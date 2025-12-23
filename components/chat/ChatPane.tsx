@@ -8,9 +8,9 @@ import { Composer } from './Composer'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useChatContext } from './ChatContext'
 import { useToast } from '@/components/ui/toast'
-import { useEffect, useRef } from 'react'
+import { useEffect } from 'react'
 import { VersionHistory } from '@/components/editor/VersionHistory'
-import { type DocumentVersion, useVersionStore } from '@/lib/store/versionStore'
+import { type DocumentVersion } from '@/lib/store/versionStore'
 
 interface ChatPaneProps {
     documentId: string
@@ -22,22 +22,6 @@ export default function ChatPane({ documentId, documentTitle, onTitleChange }: C
     const { editor } = useEditorStore()
     const { messages, sendMessage, isLoading, error } = useChatContext()
     const { toast } = useToast()
-    const versionInitialized = useRef(false)
-
-    // Initialize version history when editor loads (only once)
-    useEffect(() => {
-        if (editor && !versionInitialized.current) {
-            versionInitialized.current = true
-            const currentHtml = editor.getHTML()
-            // Save initial state
-            useVersionStore.getState().addVersion(
-                currentHtml,
-                documentTitle,
-                'Initial state',
-                'initial'
-            )
-        }
-    }, [editor, documentTitle])
 
     // Show error toast when error occurs
     useEffect(() => {
@@ -48,7 +32,7 @@ export default function ChatPane({ documentId, documentTitle, onTitleChange }: C
 
     const handleApplyEdit = (edit: EditOperation): boolean => {
         if (!editor) return false
-        return applyEdit(editor, edit, documentTitle)
+        return applyEdit(editor, edit, documentId, documentTitle)
     }
 
     const handleUpdateTitle = (newTitle: string) => {

@@ -103,7 +103,7 @@ export function MessageList({ messages, isLoading, currentTitle, ...props }: Mes
                : ((msg as any).toolInvocations || [])
 
              return (
-            <div key={msg.id || idx} className={cn("flex gap-3", msg.role === 'user' ? "flex-row-reverse" : "")}>
+            <div key={msg.id || `msg-${idx}`} className={cn("flex gap-3", msg.role === 'user' ? "flex-row-reverse" : "")}>
               <div className={cn("w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0", msg.role === 'user' ? "bg-primary text-primary-foreground" : "bg-muted")}>
                 {msg.role === 'user' ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
               </div>
@@ -129,11 +129,13 @@ export function MessageList({ messages, isLoading, currentTitle, ...props }: Mes
                             title: args.title,
                             mode: (args.mode as any) || 'replace_selection',
                             contentHtml: args.contentHtml || '',
-                            originalHtml: args.originalHtml
+                            originalHtml: args.originalHtml,
+                            targetText: args.targetText,
+                            targetHint: args.targetHint
                         }
                         
                         return (
-                            <div key={toolInvocation.toolCallId || tIdx} className="w-full">
+                            <div key={`${msg.id || `msg-${idx}`}-${toolInvocation.toolCallId || tIdx}`} className="w-full">
                                 <SuggestionCard 
                                     edit={editOp} 
                                     onApply={onApplyEdit!} 
@@ -161,7 +163,7 @@ export function MessageList({ messages, isLoading, currentTitle, ...props }: Mes
                         }
                         
                         return (
-                            <div key={toolInvocation.toolCallId || tIdx} className="w-full">
+                            <div key={`${msg.id || `msg-${idx}`}-${toolInvocation.toolCallId || tIdx}`} className="w-full">
                                 <Card className={`p-3 my-2 space-y-2 ${wasAutoApplied || currentTitle === newTitle ? 'border-green-500/20 bg-green-50' : 'border-blue-500/20 bg-blue-50'}`}>
                                     <div className="flex justify-between items-center">
                                         <span className="font-medium text-sm flex items-center gap-2">

@@ -196,3 +196,113 @@
   animation-duration: 200ms;
   animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
 }
+
+/* ===== INLINE SUGGESTION STYLES ===== */
+
+/* Wrapper for suggestion node in editor */
+.suggestion-node-wrapper {
+  display: block;
+  margin: 1rem 0;
+}
+
+/* Main suggestion block container */
+.inline-suggestion-block {
+  border-radius: 0.75rem;
+  border: 2px solid oklch(0.7 0.15 270 / 0.3);
+  background: linear-gradient(to bottom, oklch(0.7 0.15 270 / 0.05), transparent);
+  overflow: hidden;
+  box-shadow: 
+    0 4px 6px -1px oklch(0 0 0 / 0.05),
+    0 2px 4px -2px oklch(0 0 0 / 0.05);
+}
+
+/* Suggestion block header */
+.inline-suggestion-block > div:first-child {
+  background: oklch(0.7 0.15 270 / 0.1);
+  border-bottom: 1px solid oklch(0.7 0.15 270 / 0.2);
+}
+
+/* Current text (red/removal) box */
+.inline-suggestion-block .bg-red-50 {
+  background: oklch(0.95 0.02 25);
+  border: 1px solid oklch(0.85 0.08 25);
+}
+
+.dark .inline-suggestion-block .bg-red-50,
+.inline-suggestion-block .dark\:bg-red-950\/30 {
+  background: oklch(0.2 0.03 25);
+  border-color: oklch(0.35 0.06 25);
+}
+
+/* Suggested update (green/addition) box */
+.inline-suggestion-block .bg-emerald-50 {
+  background: oklch(0.95 0.03 160);
+  border: 1px solid oklch(0.85 0.08 160);
+}
+
+.dark .inline-suggestion-block .bg-emerald-50,
+.inline-suggestion-block .dark\:bg-emerald-950\/30 {
+  background: oklch(0.2 0.03 160);
+  border-color: oklch(0.35 0.06 160);
+}
+
+/* Accept button styling */
+.inline-suggestion-block button.bg-emerald-500 {
+  background: oklch(0.6 0.15 160);
+  transition: all 0.15s ease;
+}
+
+.inline-suggestion-block button.bg-emerald-500:hover {
+  background: oklch(0.55 0.17 160);
+  transform: translateY(-1px);
+}
+
+/* Reject button styling */
+.inline-suggestion-block button.text-red-600 {
+  color: oklch(0.55 0.18 25);
+}
+
+.inline-suggestion-block button.text-red-600:hover {
+  background: oklch(0.55 0.18 25 / 0.1);
+}
+
+/* Animation for suggestion block appearing */
+@keyframes suggestion-appear {
+  0% {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.inline-suggestion-block {
+  animation: suggestion-appear 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Suggestion bar at bottom */
+.suggestion-bar {
+  backdrop-filter: blur(8px);
+}
+
+/* Inline diff styles (for simpler inline changes) */
+.inline-diff-wrapper {
+  display: inline;
+}
+
+.inline-diff-wrapper .line-through {
+  text-decoration: line-through;
+  text-decoration-color: oklch(0.6 0.2 25);
+  background: oklch(0.6 0.2 25 / 0.1);
+  padding: 0 0.125rem;
+  border-radius: 0.125rem;
+}
+
+.inline-diff-wrapper .font-medium {
+  background: oklch(0.6 0.15 160 / 0.15);
+  border-bottom: 2px solid oklch(0.6 0.15 160);
+  padding: 0 0.125rem;
+  border-radius: 0.125rem;
+}

@@ -3,6 +3,7 @@ import { streamText, tool, convertToModelMessages } from 'ai'
 import { z } from 'zod'
 import { SYSTEM_PROMPT } from '@/lib/ai/prompt'
 
+export const runtime = 'edge'
 export const maxDuration = 120
 
 // Tools with execute functions to properly terminate tool calls
@@ -11,9 +12,11 @@ const tools = {
     description: 'Create or apply an edit to the document content (the body/text of the document)',
     inputSchema: z.object({
       title: z.string().describe('Short title of the edit'),
-      mode: z.enum(['insert_at_cursor', 'replace_selection', 'append_to_end', 'inline_suggestion']).describe('The mode of operation for the edit'),
-      contentHtml: z.string().describe('The HTML content to insert or replace. Use semantic HTML.'),
+      mode: z.enum(['insert_at_cursor', 'replace_selection', 'append_to_end', 'inline_suggestion', 'delete', 'find_and_replace']).describe('The mode of operation. Use "find_and_replace" when replacing specific content - provide targetText to identify what to replace. Use "delete" to remove content. Use "insert_at_cursor" or "append_to_end" for new content.'),
+      contentHtml: z.string().describe('The HTML content to insert or replace. For delete mode, this describes what to delete.'),
       originalHtml: z.string().optional().describe('Original HTML content, required if mode is inline_suggestion'),
+      targetText: z.string().optional().describe('For find_and_replace mode: The EXACT text to find and replace. Copy the precise text from the document so it can be located. Include enough context to be unique (at least a sentence or distinctive phrase).'),
+      targetHint: z.string().optional().describe('For find_and_replace mode: A hint about where the target is located, e.g. "the introduction", "first paragraph", "the heading about X", "third bullet point"'),
     }),
     // Execute function to mark tool as complete (actual edit happens client-side)
     execute: async (args) => {

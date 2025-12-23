@@ -16,6 +16,25 @@ interface ChatContextType {
 
 const ChatContext = createContext<ChatContextType | undefined>(undefined)
 
+function dedupeMessagesById<T extends { id?: string }>(msgs: T[]): T[] {
+  if (!Array.isArray(msgs) || msgs.length === 0) return []
+  const seen = new Set<string>()
+  const out: T[] = []
+
+  // Keep the *latest* occurrence of a given id (streaming updates can duplicate ids).
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    const m = msgs[i]
+    const id = (m as any)?.id as string | undefined
+    if (id) {
+      if (seen.has(id)) continue
+      seen.add(id)
+    }
+    out.push(m)
+  }
+  out.reverse()
+  return out
+}
+
 export function ChatProvider({
   children,
   documentId,
@@ -78,8 +97,12 @@ export function ChatProvider({
     }
   }, [normalizedInitialMessages, setMessages, hasSetInitial])
 
-  // Use hook messages, but fall back to normalized if hook is empty
-  const messages = hookMessages.length > 0 ? hookMessages : normalizedInitialMessages
+  // Use hook messages, but fall back to normalized if hook is empty. Always dedupe by id to
+  // avoid duplicate React keys and duplicated UI rows (can happen with streaming updates).
+  const messages = useMemo(() => {
+    const base = hookMessages.length > 0 ? hookMessages : (normalizedInitialMessages as any as UIMessage[])
+    return dedupeMessagesById(base)
+  }, [hookMessages, normalizedInitialMessages])
 
   // Check if we're actually loading - with timeout protection
   const [forceReady, setForceReady] = useState(false)
@@ -113,7 +136,7 @@ export function ChatProvider({
   }, [status])
   
   // Also check if we have a complete tool call - if so, consider not loading
-  const hasCompleteToolCall = hookMessages.length > 0 && hookMessages.some((m: any) => 
+  const hasCompleteToolCall = messages.length > 0 && messages.some((m: any) => 
     m.parts?.some((p: any) => p.type === 'tool-call' && p.toolName && (p.input || p.args))
   )
   
@@ -121,12 +144,12 @@ export function ChatProvider({
   const hasMounted = React.useRef(false)
   const lastSavedLength = React.useRef(0)
   const prevStatus = React.useRef(status)
-  const messagesRef = React.useRef(hookMessages)
+  const messagesRef = React.useRef(messages)
   
-  // Keep messagesRef updated with the latest hook messages
+  // Keep messagesRef updated with the latest deduped messages
   React.useEffect(() => {
-    messagesRef.current = hookMessages
-  }, [hookMessages])
+    messagesRef.current = messages
+  }, [messages])
 
   // Save on page unload
   React.useEffect(() => {
@@ -149,7 +172,7 @@ export function ChatProvider({
     // Prevent saving on initial mount to avoid overwriting with empty/incomplete messages
     if (!hasMounted.current) {
       hasMounted.current = true
-      lastSavedLength.current = hookMessages.length
+      lastSavedLength.current = messages.length
       return
     }
 
@@ -158,22 +181,22 @@ export function ChatProvider({
     // 2. We just finished streaming (status changed from streaming to ready) OR
     // 3. We have more messages than last saved
     const justFinishedStreaming = prevStatus.current === 'streaming' && status === 'ready'
-    const hasNewMessages = hookMessages.length > lastSavedLength.current
+    const hasNewMessages = messages.length > lastSavedLength.current
 
     prevStatus.current = status
 
-    if (hookMessages && hookMessages.length > 0 && !isLoading && (justFinishedStreaming || hasNewMessages)) {
+    if (messages && messages.length > 0 && !isLoading && (justFinishedStreaming || hasNewMessages)) {
       // Small debounce to ensure state is settled
       const timer = setTimeout(() => {
-        saveChat(documentId, hookMessages)
+        saveChat(documentId, messages)
           .then(() => {
-            lastSavedLength.current = hookMessages.length
+            lastSavedLength.current = messages.length
           })
           .catch(() => {})
       }, 500)
       return () => clearTimeout(timer)
     }
-  }, [hookMessages, status, isLoading, documentId])
+  }, [messages, status, isLoading, documentId])
 
   const value = useMemo(() => ({
     messages,

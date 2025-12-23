@@ -1,6 +1,7 @@
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import BubbleMenu from '@tiptap/extension-bubble-menu'
+import { SuggestionNode } from './suggestionExtension'
 
 export const defaultExtensions = [
   StarterKit.configure({
@@ -13,4 +14,5 @@ export const defaultExtensions = [
   BubbleMenu.configure({
     element: null, // Rendered by React component
   }),
+  SuggestionNode,
 ]

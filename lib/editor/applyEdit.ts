@@ -22,7 +22,102 @@ function isValidContent(html: string): boolean {
   return true
 }
 
-export function applyEdit(editor: Editor, edit: EditOperation, currentTitle?: string): boolean {
+// Normalize text for fuzzy matching (lowercase, collapse whitespace, remove punctuation)
+function normalizeText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[\n\r\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/[^\w\s]/g, '')
+    .trim()
+}
+
+// Find the position of target text in the editor document
+// Returns { from, to } positions or null if not found
+export function findTextInDocument(editor: Editor, targetText: string): { from: number; to: number } | null {
+  if (!editor || !targetText) return null
+  
+  const docText = editor.state.doc.textContent
+  const normalizedTarget = normalizeText(targetText)
+  const normalizedDoc = normalizeText(docText)
+  
+  // First try exact match
+  const exactIndex = docText.indexOf(targetText)
+  if (exactIndex !== -1) {
+    return { from: exactIndex + 1, to: exactIndex + targetText.length + 1 } // +1 for prosemirror offset
+  }
+  
+  // Try normalized match
+  const normalizedIndex = normalizedDoc.indexOf(normalizedTarget)
+  if (normalizedIndex === -1) return null
+  
+  // Map normalized position back to original document
+  // We need to find the actual position by scanning through
+  let originalPos = 0
+  let normalizedPos = 0
+  
+  while (normalizedPos < normalizedIndex && originalPos < docText.length) {
+    const char = docText[originalPos]
+    const normalizedChar = normalizeText(char)
+    if (normalizedChar.length > 0) {
+      normalizedPos += normalizedChar.length
+    }
+    originalPos++
+  }
+  
+  // Now find the end position
+  let endPos = originalPos
+  let matchLen = 0
+  while (matchLen < normalizedTarget.length && endPos < docText.length) {
+    const char = docText[endPos]
+    const normalizedChar = normalizeText(char)
+    if (normalizedChar.length > 0) {
+      matchLen += normalizedChar.length
+    }
+    endPos++
+  }
+  
+  // Prosemirror positions are 1-indexed (document starts at pos 1)
+  return { from: originalPos + 1, to: endPos + 1 }
+}
+
+// Find text using fuzzy matching for partial matches
+export function findTextFuzzy(editor: Editor, targetText: string): { from: number; to: number; score: number } | null {
+  if (!editor || !targetText || targetText.length < 10) return null
+  
+  const docText = editor.state.doc.textContent
+  const targetWords = normalizeText(targetText).split(' ').filter(w => w.length > 2)
+  
+  if (targetWords.length === 0) return null
+  
+  // Sliding window approach to find best match
+  let bestMatch: { from: number; to: number; score: number } | null = null
+  const windowSize = targetText.length * 1.5 // Allow some variance
+  
+  for (let i = 0; i < docText.length - 20; i += 10) {
+    const window = docText.slice(i, i + windowSize)
+    const windowWords = normalizeText(window).split(' ').filter(w => w.length > 2)
+    
+    // Count matching words
+    let matches = 0
+    for (const word of targetWords) {
+      if (windowWords.includes(word)) matches++
+    }
+    
+    const score = matches / targetWords.length
+    if (score > 0.6 && (!bestMatch || score > bestMatch.score)) {
+      // Find exact boundaries of the match
+      const trimmedWindow = window.trim()
+      const actualFrom = i + 1 // +1 for prosemirror
+      const actualTo = actualFrom + trimmedWindow.length
+      bestMatch = { from: actualFrom, to: actualTo, score }
+    }
+  }
+  
+  return bestMatch
+}
+
+export function applyEdit(editor: Editor, edit: EditOperation, documentId: string, currentTitle?: string): boolean {
   // Validate inputs
   if (!editor) {
     console.warn('applyEdit: No editor provided')
@@ -132,6 +227,7 @@ export function applyEdit(editor: Editor, edit: EditOperation, currentTitle?: st
       try {
         const newHtml = editor.getHTML()
         useVersionStore.getState().addVersion(
+          documentId,
           newHtml,
           currentTitle || 'Untitled Document',
           edit.title || 'AI Edit',

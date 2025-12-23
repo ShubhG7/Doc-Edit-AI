@@ -25,7 +25,13 @@ A Notion-like document editor with an AI chat sidebar powered by Claude. Write, 
 
 ### Environment Variables
 
-Create a `.env.local` file:
+Create a `.env.local` file (you can copy the template `env.example`):
+
+```bash
+cp env.example .env.local
+```
+
+Then fill in:
 
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
@@ -48,6 +54,46 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000)
+
+## Deploying to Vercel
+
+### 1) Create a Vercel project
+
+- Push this repo to GitHub/GitLab/Bitbucket
+- In Vercel: **Add New → Project** → import the repo
+- Vercel should auto-detect **Next.js**
+
+### 2) Set Environment Variables in Vercel
+
+In Vercel project settings → **Environment Variables**, add:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `ANTHROPIC_API_KEY`
+
+Set them for **Production** (and **Preview** if you want preview deploys to work).
+
+### 3) Configure Supabase OAuth Redirect URLs
+
+This app uses `redirectTo: ${location.origin}/auth/callback` and exchanges the code in `app/auth/callback/route.ts`.
+
+In Supabase Dashboard → **Authentication → URL Configuration**:
+
+- **Site URL**:
+  - Local: `http://localhost:3000`
+  - Production: `https://YOUR_DOMAIN` (custom domain) or `https://YOUR_PROJECT.vercel.app`
+- **Redirect URLs** (add all you will use):
+  - `http://localhost:3000/auth/callback`
+  - `https://YOUR_DOMAIN/auth/callback`
+  - `https://YOUR_PROJECT.vercel.app/auth/callback`
+
+Then in Supabase Dashboard → **Authentication → Providers → Google**:
+- Ensure your Google OAuth client has the Supabase callback URL configured (Supabase shows the exact callback URL to whitelist).
+
+### 4) Deploy
+
+- Trigger a deploy in Vercel (or push to `main`)
+- Visit your deployed URL and sign in via Google
 
 ## Architecture
 
@@ -121,7 +167,7 @@ Open [http://localhost:3000](http://localhost:3000)
 
 ## Tech Stack
 
-- **Framework**: Next.js 15 (App Router)
+- **Framework**: Next.js 16 (App Router)
 - **Editor**: TipTap (ProseMirror-based)
 - **AI**: Anthropic Claude via AI SDK
 - **Database**: Supabase (PostgreSQL)
