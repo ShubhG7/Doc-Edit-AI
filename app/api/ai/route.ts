@@ -5,8 +5,7 @@ import { SYSTEM_PROMPT } from '@/lib/ai/prompt'
 
 export const maxDuration = 120
 
-// Tool definitions - these are UI-only tools (no server execution)
-// The client handles applying edits and title changes
+// Tools with execute functions to properly terminate tool calls
 const tools = {
   apply_edit: tool({
     description: 'Create or apply an edit to the document content (the body/text of the document)',
@@ -16,12 +15,20 @@ const tools = {
       contentHtml: z.string().describe('The HTML content to insert or replace. Use semantic HTML.'),
       originalHtml: z.string().optional().describe('Original HTML content, required if mode is inline_suggestion'),
     }),
+    // Execute function to mark tool as complete (actual edit happens client-side)
+    execute: async (args) => {
+      return { success: true, mode: args.mode, title: args.title }
+    },
   }),
   update_document_title: tool({
     description: 'Update the document title/name (the metadata title that appears in the document list and browser tab, NOT a heading in the content)',
     inputSchema: z.object({
       newTitle: z.string().min(1).describe('The new title for the document'),
     }),
+    // Execute function to mark tool as complete (actual title change happens client-side)
+    execute: async (args) => {
+      return { success: true, newTitle: args.newTitle }
+    },
   }),
 }
 
@@ -29,20 +36,16 @@ export async function POST(req: Request) {
   try {
     const { messages, documentHtml, selectionText, documentTitle } = await req.json()
 
-    // Validate messages
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
       return new Response(JSON.stringify({ error: 'No messages provided' }), { status: 400 })
     }
 
-    // AI SDK v6 requires converting UI messages to ModelMessages for streamText
-    // We ignore incomplete tool calls to avoid "Each tool_use block must have a corresponding tool_result block" error
     let modelMessages: any[] = []
     try {
       modelMessages = await convertToModelMessages(messages, {
           ignoreIncompleteToolCalls: true
       })
     } catch {
-      // Fallback: create simple messages from the input
       modelMessages = messages.map((m: any) => ({
         role: m.role || 'user',
         content: typeof m.content === 'string' ? m.content : (m.text || 'Hello')
@@ -50,7 +53,6 @@ export async function POST(req: Request) {
     }
     
     if (!modelMessages || modelMessages.length === 0) {
-        // Fallback to creating a message from the last input
         const lastInput = messages[messages.length - 1]
         modelMessages = [{
           role: 'user',
@@ -61,7 +63,6 @@ export async function POST(req: Request) {
     const initialMessages = modelMessages.slice(0, -1)
     const lastMessage = modelMessages[modelMessages.length - 1]
 
-    // Safely extract text from the last message
     let lastMessageText = 'Follow the user intent based on history'
     if (lastMessage) {
       if (typeof lastMessage.content === 'string') {
@@ -74,32 +75,41 @@ export async function POST(req: Request) {
       }
     }
 
-    // Detect if this is a fresh document that needs deep research
     const isFreshDocument = (!documentTitle || documentTitle === 'Untitled Document') && 
                             (!documentHtml || documentHtml === '<p>Start writing...</p>' || documentHtml === 'Empty Document')
     
+    const hasExistingContent = documentHtml && 
+      documentHtml !== '<p>Start writing...</p>' && 
+      documentHtml !== '<p></p>' &&
+      documentHtml.length > 50
+
     const contextMessage = `
 User Request:
 ${lastMessageText}
 
 Document Title: ${documentTitle || 'Untitled Document'}
 
-Document Content:
+=== CURRENT DOCUMENT CONTENT (ANALYZE THIS CAREFULLY) ===
 ${documentHtml || 'Empty Document'}
+=== END OF DOCUMENT CONTENT ===
+
+${hasExistingContent ? `
+IMPORTANT: The document above contains existing content. Before generating any new content:
+1. Read and understand the document's topic, themes, and key points
+2. Match the tone, style, and vocabulary used
+3. If adding an introduction: summarize/preview the main topics covered
+4. If adding a conclusion: summarize the key points made
+5. Ensure seamless integration with existing content
+` : ''}
 
 Selection:
 ${selectionText || 'No selection'}
 
-${isFreshDocument ? `FRESH DOCUMENT MODE: This is a new document. You MUST:
-1. Think deeply about the topic and structure before writing
-2. Research and consider multiple angles and perspectives
-3. Call update_document_title with an appropriate title
-4. Provide comprehensive, well-researched content` : ''}
+${isFreshDocument ? `FRESH DOCUMENT MODE: This is a new document. You MUST call update_document_title AND apply_edit.` : ''}
 
-DIRECTIVE: Fulfill the User Request above immediately. If the request is to write or create content, use apply_edit. If the request is to rename/retitle the document, use update_document_title. Do not ask for context.
+DIRECTIVE: Fulfill the request immediately using the tools. Do not ask questions.
 `
 
-    // Use extended thinking for fresh documents to enable deep research
     const result = streamText({
       model: anthropic('claude-sonnet-4-5'),
       system: SYSTEM_PROMPT,
@@ -108,11 +118,11 @@ DIRECTIVE: Fulfill the User Request above immediately. If the request is to writ
         { role: 'user', content: contextMessage }
       ],
       tools,
-      // Enable extended thinking for fresh documents
+      toolChoice: 'auto',
       ...(isFreshDocument ? {
         providerOptions: {
           anthropic: {
-            thinking: { type: 'enabled', budgetTokens: 10000 }
+            thinking: { type: 'enabled', budgetTokens: 8000 }
           }
         }
       } : {})
@@ -120,6 +130,7 @@ DIRECTIVE: Fulfill the User Request above immediately. If the request is to writ
 
     return result.toUIMessageStreamResponse()
   } catch (error: any) {
+    console.error('AI route error:', error)
     return new Response(JSON.stringify({ 
       error: 'AI request failed',
       details: error?.message || 'Unknown error'

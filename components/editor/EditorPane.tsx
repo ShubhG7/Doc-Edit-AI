@@ -6,6 +6,7 @@ import { useEditorStore } from '@/lib/store/editorStore'
 import { useEffect, useCallback } from 'react'
 import { EditorToolbar } from './EditorToolbar'
 import { FloatingImproveButton } from './FloatingImproveButton'
+import { ReplacementOverlay } from './ReplacementOverlay'
 import { saveDocument } from '@/lib/store/documentStore'
 import { debounce } from 'lodash'
 
@@ -48,6 +49,7 @@ export default function EditorPane({ initialContent, documentId, title, onTitleC
     <div className="flex flex-col h-full w-full relative">
       <EditorToolbar editor={editor} />
       <FloatingImproveButton editor={editor} />
+      <ReplacementOverlay />
       <div className="flex-1 overflow-y-auto bg-background" onClick={() => editor?.chain().focus().run()}>
         <div className="max-w-4xl mx-auto px-4 py-8">
             <h1 

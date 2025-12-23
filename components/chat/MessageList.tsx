@@ -21,7 +21,7 @@ export interface Message {
 
 interface MessageListProps {
   messages: Message[]
-  onApplyEdit?: (edit: EditOperation) => void
+  onApplyEdit?: (edit: EditOperation) => boolean | void
   onUpdateTitle?: (newTitle: string) => void
   isLoading?: boolean
   currentTitle?: string
@@ -53,65 +53,9 @@ function ThinkingBlock({ content }: { content: string }) {
 export function MessageList({ messages, isLoading, currentTitle, ...props }: MessageListProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const appliedChanges = useRef<Set<string>>(new Set())
+  const appliedTitles = useRef<Set<string>>(new Set())
   
   const { onApplyEdit, onUpdateTitle } = props
-  
-  // Helper to extract tool calls from a message
-  const extractToolCalls = (msg: Message, msgIndex: number) => {
-    if (!msg?.parts || !Array.isArray(msg.parts)) return []
-    return msg.parts
-      .filter(p => p && (p.type === 'tool-call' || p.type?.startsWith('tool-')))
-      .map((p, pIndex) => ({
-        // Use stable ID based on message and part index if no toolCallId
-        toolCallId: (p as any).toolCallId || (p as any).id || `tc-${msgIndex}-${pIndex}`,
-        toolName: (p as any).toolName || p.type?.replace('tool-', ''),
-        args: (p as any).input || (p as any).args || {}
-      }))
-  }
-  
-  // Auto-apply title and edit changes for fresh documents (runs once per new tool call)
-  useEffect(() => {
-    const isFreshDocument = currentTitle === 'Untitled Document'
-    if (!isFreshDocument) return // Only auto-apply for fresh documents
-    
-    const messageList = messages || []
-    for (let msgIndex = 0; msgIndex < messageList.length; msgIndex++) {
-      const msg = messageList[msgIndex]
-      const toolCalls = extractToolCalls(msg, msgIndex)
-      
-      for (const tc of toolCalls) {
-        const changeId = tc.toolCallId
-        if (appliedChanges.current.has(changeId)) continue
-        
-        // Auto-apply title changes for fresh documents
-        if (tc.toolName === 'update_document_title' && onUpdateTitle) {
-          const newTitle = tc.args?.newTitle
-          if (newTitle) {
-            appliedChanges.current.add(changeId)
-            // Use setTimeout to avoid state updates during render
-            setTimeout(() => onUpdateTitle(newTitle), 0)
-          }
-        }
-        
-        // Auto-apply content edits for fresh documents  
-        if (tc.toolName === 'apply_edit' && onApplyEdit) {
-          const args = tc.args
-          if (args?.contentHtml && args?.mode) {
-            appliedChanges.current.add(changeId)
-            // Use setTimeout to avoid state updates during render
-            setTimeout(() => onApplyEdit({
-              id: changeId,
-              title: args.title || 'AI Edit',
-              mode: args.mode,
-              contentHtml: args.contentHtml,
-              originalHtml: args.originalHtml
-            }), 0)
-          }
-        }
-      }
-    }
-  }, [messages, currentTitle, onUpdateTitle, onApplyEdit])
   
   // Auto-scroll to bottom when messages change or loading state changes
   useEffect(() => {
@@ -144,19 +88,17 @@ export function MessageList({ messages, isLoading, currentTitle, ...props }: Mes
                ? msg.parts.filter(p => p && p.type === 'reasoning').map(p => p.text || '').join('\n')
                : ''
              
-             // Support legacy thinking tags if they are in text parts
              const thinkingMatch = typeof textParts === 'string' ? textParts.match(/<thinking>([\s\S]*?)<\/thinking>/) : null
              const thinking = reasoningParts || (thinkingMatch ? thinkingMatch[1].trim() : null)
              const cleanContent = String(textParts.replace(/<thinking>[\s\S]*?<\/thinking>/, '').trim())
              
             const toolInvocations = hasParts
                ? (msg.parts || [])
-                   .filter(p => p && (p.type === 'tool-call' || p.type.startsWith('tool-') || p.type === 'dynamic-tool'))
+                   .filter(p => p && (p.type === 'tool-call' || (p.type && p.type.startsWith('tool-'))))
                    .map(p => ({
-                       toolCallId: p.toolCallId || (p as any).id,
-                       toolName: p.toolName || (p.type === 'tool-call' ? (p as any).toolName : p.type.replace('tool-', '')),
-                       // AI SDK v6 uses 'input' for tool args, fallback to 'args' for compatibility
-                       args: (p as any).input || p.args
+                       toolCallId: (p as any).toolCallId || (p as any).id || `tc-${idx}`,
+                       toolName: (p as any).toolName || (p.type === 'tool-call' ? (p as any).toolName : p.type?.replace('tool-', '')),
+                       args: (p as any).input || (p as any).args || {}
                    }))
                : ((msg as any).toolInvocations || [])
 
@@ -179,10 +121,9 @@ export function MessageList({ messages, isLoading, currentTitle, ...props }: Mes
                     if (toolInvocation && toolInvocation.toolName === 'apply_edit') {
                         const args = (toolInvocation.args || {}) as unknown as Partial<EditOperation>
                         
-                        // Show the card as soon as we have a title
                         if (!args.title) return null
                         
-                        const isComplete = !!(args.mode && args.contentHtml)
+                        const isComplete = !!(args.mode && args.contentHtml && args.contentHtml.length > 10)
                         const editOp: EditOperation = {
                             id: toolInvocation.toolCallId || `edit-${tIdx}`,
                             title: args.title,
@@ -209,22 +150,30 @@ export function MessageList({ messages, isLoading, currentTitle, ...props }: Mes
                         
                         if (!newTitle) return null
                         
-                        const wasAutoApplied = appliedChanges.current.has(toolInvocation.toolCallId)
+                        const titleKey = `${toolInvocation.toolCallId}-${newTitle}`
+                        const wasAutoApplied = appliedTitles.current.has(titleKey)
+                        
+                        // Auto-apply title for fresh documents
+                        if (!wasAutoApplied && currentTitle === 'Untitled Document' && onUpdateTitle) {
+                            appliedTitles.current.add(titleKey)
+                            // Apply in next tick to avoid render issues
+                            setTimeout(() => onUpdateTitle(newTitle), 10)
+                        }
                         
                         return (
                             <div key={toolInvocation.toolCallId || tIdx} className="w-full">
-                                <Card className={`p-3 my-2 space-y-2 ${wasAutoApplied ? 'border-green-500/20 bg-green-50' : 'border-blue-500/20 bg-blue-50'}`}>
+                                <Card className={`p-3 my-2 space-y-2 ${wasAutoApplied || currentTitle === newTitle ? 'border-green-500/20 bg-green-50' : 'border-blue-500/20 bg-blue-50'}`}>
                                     <div className="flex justify-between items-center">
                                         <span className="font-medium text-sm flex items-center gap-2">
-                                            <FileText className={`h-4 w-4 ${wasAutoApplied ? 'text-green-600' : 'text-blue-600'}`} />
-                                            {wasAutoApplied ? 'Document Renamed' : 'Rename Document'}
+                                            <FileText className={`h-4 w-4 ${wasAutoApplied || currentTitle === newTitle ? 'text-green-600' : 'text-blue-600'}`} />
+                                            {wasAutoApplied || currentTitle === newTitle ? 'Document Renamed' : 'Rename Document'}
                                         </span>
-                                        {wasAutoApplied && <Check className="h-4 w-4 text-green-600" />}
+                                        {(wasAutoApplied || currentTitle === newTitle) && <Check className="h-4 w-4 text-green-600" />}
                                     </div>
                                     <p className="text-sm text-muted-foreground">
-                                        {wasAutoApplied ? 'Title set to: ' : 'New title: '}<strong>{newTitle}</strong>
+                                        {wasAutoApplied || currentTitle === newTitle ? 'Title set to: ' : 'New title: '}<strong>{newTitle}</strong>
                                     </p>
-                                    {!wasAutoApplied && (
+                                    {!(wasAutoApplied || currentTitle === newTitle) && (
                                         <Button 
                                             size="sm" 
                                             onClick={() => onUpdateTitle?.(newTitle)} 
@@ -264,9 +213,7 @@ export function MessageList({ messages, isLoading, currentTitle, ...props }: Mes
         </div>
       )}
       
-      {/* Invisible element to scroll to */}
       <div ref={bottomRef} />
     </div>
   )
 }
-

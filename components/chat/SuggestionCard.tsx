@@ -3,8 +3,9 @@
 import { EditOperation } from '@/lib/ai/types'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { ChevronDown, ChevronRight, Check, Loader2, AlertCircle } from 'lucide-react'
+import { ChevronDown, ChevronRight, Check, Loader2, AlertCircle, MousePointer2 } from 'lucide-react'
 import { useState, useMemo } from 'react'
+import { useEditorStore } from '@/lib/store/editorStore'
 
 interface SuggestionCardProps {
   edit: EditOperation
@@ -17,6 +18,8 @@ export function SuggestionCard({ edit, onApply, isStreaming }: SuggestionCardPro
   const [isApplying, setIsApplying] = useState(false)
   const [isApplied, setIsApplied] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  
+  const { startEdit } = useEditorStore()
 
   // Check if content appears complete
   const isContentComplete = useMemo(() => {
@@ -35,32 +38,16 @@ export function SuggestionCard({ edit, onApply, isStreaming }: SuggestionCardPro
   }, [edit.contentHtml])
 
   const canApply = !isStreaming && isContentComplete && !isApplying && !isApplied
+  
+  // Check if this is a replace operation that needs interactive selection
+  const isReplaceMode = edit.mode === 'replace_selection' || edit.mode === 'inline_suggestion'
 
   const handleApply = () => {
     if (!canApply) return
     
-    setIsApplying(true)
-    setError(null)
-    
-    try {
-      const result = onApply(edit)
-      
-      // If onApply returns false, it means it failed
-      if (result === false) {
-        setIsApplying(false)
-        setError('Content not ready yet. Please wait for it to finish generating.')
-        return
-      }
-      
-      // Show success state
-      setTimeout(() => {
-        setIsApplying(false)
-        setIsApplied(true)
-      }, 300)
-    } catch (e) {
-      setIsApplying(false)
-      setError('Failed to apply. Please try again.')
-    }
+    // All modes now use interactive flow with preview
+    startEdit(edit)
+    setIsApplied(true) // Mark as handled
   }
 
   // Strip HTML tags for plain text preview
@@ -150,7 +137,7 @@ export function SuggestionCard({ edit, onApply, isStreaming }: SuggestionCardPro
         ) : isApplied ? (
           <>
             <Check className="h-3 w-3 mr-2" />
-            Applied
+            {isReplaceMode ? 'Select Text in Document' : 'Place Cursor in Document'}
           </>
         ) : !isContentComplete ? (
           <>
@@ -158,7 +145,10 @@ export function SuggestionCard({ edit, onApply, isStreaming }: SuggestionCardPro
             Waiting for content...
           </>
         ) : (
-          'Apply Suggestion'
+          <>
+            <MousePointer2 className="h-3 w-3 mr-2" />
+            Preview & Apply
+          </>
         )}
       </Button>
     </Card>

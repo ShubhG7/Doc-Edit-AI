@@ -81,7 +81,43 @@ export function ChatProvider({
   // Use hook messages, but fall back to normalized if hook is empty
   const messages = hookMessages.length > 0 ? hookMessages : normalizedInitialMessages
 
-  const isLoading = status === 'submitted' || status === 'streaming'
+  // Check if we're actually loading - with timeout protection
+  const [forceReady, setForceReady] = useState(false)
+  const loadingTimeoutRef = React.useRef<NodeJS.Timeout | null>(null)
+  
+  // Reset force ready when status changes to submitted
+  useEffect(() => {
+    if (status === 'submitted' || status === 'streaming') {
+      setForceReady(false)
+      
+      // Set a timeout to force-ready if stuck for too long (30 seconds)
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current)
+      }
+      loadingTimeoutRef.current = setTimeout(() => {
+        setForceReady(true)
+      }, 30000)
+    } else {
+      // Clear timeout when we naturally become ready
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current)
+        loadingTimeoutRef.current = null
+      }
+    }
+    
+    return () => {
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current)
+      }
+    }
+  }, [status])
+  
+  // Also check if we have a complete tool call - if so, consider not loading
+  const hasCompleteToolCall = hookMessages.length > 0 && hookMessages.some((m: any) => 
+    m.parts?.some((p: any) => p.type === 'tool-call' && p.toolName && (p.input || p.args))
+  )
+  
+  const isLoading = !forceReady && (status === 'submitted' || status === 'streaming') && !hasCompleteToolCall
   const hasMounted = React.useRef(false)
   const lastSavedLength = React.useRef(0)
   const prevStatus = React.useRef(status)

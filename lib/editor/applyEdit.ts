@@ -2,6 +2,7 @@ import { Editor } from '@tiptap/react'
 import { EditOperation } from '@/lib/ai/types'
 import DOMPurify from 'isomorphic-dompurify'
 import { useVersionStore } from '@/lib/store/versionStore'
+import { useEditorStore } from '@/lib/store/editorStore'
 
 // Check if the editor has only placeholder content
 function isEmptyOrPlaceholder(editor: Editor): boolean {
@@ -63,10 +64,35 @@ export function applyEdit(editor: Editor, edit: EditOperation, currentTitle?: st
       case 'replace_selection':
         if (isEmptyOrPlaceholder(editor)) {
           editor.chain().focus().clearContent().setContent(content).run()
-        } else if (editor.state.selection.empty) {
-          editor.chain().focus().insertContent(content).run()
         } else {
-          editor.chain().focus().deleteSelection().insertContent(content).run()
+          // Try to use stored selection first (preserved from when user sent message)
+          const storedSel = useEditorStore.getState().storedSelection
+          const currentSelection = editor.state.selection
+          
+          // Check if stored selection is valid and recent (within 5 minutes)
+          const useStoredSelection = storedSel && 
+            storedSel.from !== storedSel.to &&
+            storedSel.from >= 0 && 
+            storedSel.to <= editor.state.doc.content.size &&
+            Date.now() - storedSel.timestamp < 300000 // 5 minutes
+          
+          if (useStoredSelection) {
+            // Use the stored selection position
+            editor.chain()
+              .focus()
+              .setTextSelection({ from: storedSel.from, to: storedSel.to })
+              .deleteSelection()
+              .insertContent(content)
+              .run()
+            // Clear the stored selection after using it
+            useEditorStore.getState().clearStoredSelection()
+          } else if (!currentSelection.empty) {
+            // Use current selection if available
+            editor.chain().focus().deleteSelection().insertContent(content).run()
+          } else {
+            // No selection available - fall back to insert at cursor
+            editor.chain().focus().insertContent(content).run()
+          }
         }
         break
         

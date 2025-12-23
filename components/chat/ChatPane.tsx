@@ -29,16 +29,15 @@ export default function ChatPane({ documentId, documentTitle, onTitleChange }: C
         if (editor && !versionInitialized.current) {
             versionInitialized.current = true
             const currentHtml = editor.getHTML()
-            const versionStore = useVersionStore.getState()
-            
-            // First try to load from DB, then initialize if empty
-            versionStore.loadFromDB(documentId).then(() => {
-                if (useVersionStore.getState().versions.length === 0) {
-                    versionStore.initialize(documentId, currentHtml, documentTitle)
-                }
-            })
+            // Save initial state
+            useVersionStore.getState().addVersion(
+                currentHtml,
+                documentTitle,
+                'Initial state',
+                'initial'
+            )
         }
-    }, [editor, documentId, documentTitle])
+    }, [editor, documentTitle])
 
     // Show error toast when error occurs
     useEffect(() => {
@@ -69,7 +68,12 @@ export default function ChatPane({ documentId, documentTitle, onTitleChange }: C
         }
     }
 
+    const { storeCurrentSelection, clearStoredSelection } = useEditorStore()
+
     const handleSend = async (text: string) => {
+        // Store the current selection before sending (it will be lost when focus moves to chat)
+        storeCurrentSelection()
+        
         await sendMessage({ 
             text,
             body: {
