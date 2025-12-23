@@ -1,0 +1,178 @@
+'use client'
+
+import React, { createContext, useContext, useMemo, useEffect, useState, useCallback } from 'react'
+import { useChat } from '@ai-sdk/react'
+import { DefaultChatTransport, UIMessage } from 'ai'
+import { saveChat } from '@/lib/store/documentStore'
+
+interface ChatContextType {
+  messages: UIMessage[]
+  sendMessage: (options: { text: string; body?: any }) => Promise<void>
+  status: 'ready' | 'submitted' | 'streaming' | 'error'
+  isLoading: boolean
+  documentId: string
+  error: string | null
+}
+
+const ChatContext = createContext<ChatContextType | undefined>(undefined)
+
+export function ChatProvider({
+  children,
+  documentId,
+  initialMessages
+}: {
+  children: React.ReactNode
+  documentId: string
+  initialMessages?: any[]
+}) {
+  // Normalize messages to ensure they match the UIMessage structure perfectly
+  const normalizedInitialMessages = useMemo(() => {
+    if (!initialMessages || !Array.isArray(initialMessages)) return []
+    return initialMessages.map((m: any, idx: number) => ({
+      id: m.id || `hist-${idx}`,
+      role: m.role || 'assistant',
+      content: typeof m.content === 'string' ? m.content : (m.text || ''),
+      parts: m.parts || (m.text ? [{ type: 'text', text: m.text }] : []),
+      ...m
+    }))
+  }, [initialMessages])
+
+  const transport = useMemo(() => new DefaultChatTransport({
+    api: '/api/ai',
+  }), [])
+
+  // Generate a unique ID for this chat session to avoid caching issues
+  const chatSessionId = useMemo(() => `${documentId}-${Date.now()}`, [documentId])
+  
+  const [error, setError] = useState<string | null>(null)
+
+  const chatResult = useChat({
+    id: chatSessionId,
+    initialMessages: normalizedInitialMessages as any,
+    transport,
+    onError: (err: any) => {
+        setError(err?.message || 'Something went wrong. Please try again.')
+        // Clear error after 5 seconds
+        setTimeout(() => setError(null), 5000)
+    }
+  } as any)
+
+  // Extremely safe destructuring based on actual SDK discovery
+  const chat = (chatResult || {}) as any
+  const hookMessages = (chat.messages || []) as UIMessage[]
+  const setMessages = chat.setMessages as ((messages: UIMessage[]) => void) | undefined
+  
+  // Natively, this version uses 'sendMessage' instead of 'append'
+  const hookSendMessage = typeof chat.sendMessage === 'function' ? chat.sendMessage : null
+  const status = chat.status || 'ready'
+  
+  // Use combined messages: initial + hook messages
+  // This ensures we always show initial messages even if the hook doesn't pick them up
+  const [hasSetInitial, setHasSetInitial] = useState(false)
+  
+  useEffect(() => {
+    // On mount, if we have initial messages but the hook is empty, force set them
+    if (!hasSetInitial && normalizedInitialMessages.length > 0 && setMessages) {
+      setMessages(normalizedInitialMessages as any)
+      setHasSetInitial(true)
+    }
+  }, [normalizedInitialMessages, setMessages, hasSetInitial])
+
+  // Use hook messages, but fall back to normalized if hook is empty
+  const messages = hookMessages.length > 0 ? hookMessages : normalizedInitialMessages
+
+  const isLoading = status === 'submitted' || status === 'streaming'
+  const hasMounted = React.useRef(false)
+  const lastSavedLength = React.useRef(0)
+  const prevStatus = React.useRef(status)
+  const messagesRef = React.useRef(hookMessages)
+  
+  // Keep messagesRef updated with the latest hook messages
+  React.useEffect(() => {
+    messagesRef.current = hookMessages
+  }, [hookMessages])
+
+  // Save on page unload
+  React.useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (messagesRef.current.length > 0) {
+        // Use sendBeacon for reliable save on page unload
+        const data = JSON.stringify({
+          document_id: documentId,
+          messages: messagesRef.current
+        })
+        navigator.sendBeacon('/api/save-chat', data)
+      }
+    }
+    
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [documentId])
+
+  useEffect(() => {
+    // Prevent saving on initial mount to avoid overwriting with empty/incomplete messages
+    if (!hasMounted.current) {
+      hasMounted.current = true
+      lastSavedLength.current = hookMessages.length
+      return
+    }
+
+    // Save when:
+    // 1. We have hook messages (not just initial) AND
+    // 2. We just finished streaming (status changed from streaming to ready) OR
+    // 3. We have more messages than last saved
+    const justFinishedStreaming = prevStatus.current === 'streaming' && status === 'ready'
+    const hasNewMessages = hookMessages.length > lastSavedLength.current
+
+    prevStatus.current = status
+
+    if (hookMessages && hookMessages.length > 0 && !isLoading && (justFinishedStreaming || hasNewMessages)) {
+      // Small debounce to ensure state is settled
+      const timer = setTimeout(() => {
+        saveChat(documentId, hookMessages)
+          .then(() => {
+            lastSavedLength.current = hookMessages.length
+          })
+          .catch(() => {})
+      }, 500)
+      return () => clearTimeout(timer)
+    }
+  }, [hookMessages, status, isLoading, documentId])
+
+  const value = useMemo(() => ({
+    messages,
+    sendMessage: async (options: { text: string; body?: any }) => {
+        if (hookSendMessage) {
+            setError(null)
+            try {
+                // AI SDK v6 sendMessage takes { text: string } as first arg, options as second
+                await hookSendMessage({
+                    text: options.text,
+                }, {
+                    body: options.body || {}
+                })
+            } catch (err: any) {
+                setError(err?.message || 'Failed to send message')
+            }
+        }
+    },
+    status: status as any,
+    isLoading,
+    documentId,
+    error
+  }), [messages, hookSendMessage, status, isLoading, documentId, error])
+
+  return (
+    <ChatContext.Provider value={value}>
+      {children}
+    </ChatContext.Provider>
+  )
+}
+
+export function useChatContext() {
+  const context = useContext(ChatContext)
+  if (context === undefined) {
+    throw new Error('useChatContext must be used within a ChatProvider')
+  }
+  return context
+}
